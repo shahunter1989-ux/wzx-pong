@@ -11,6 +11,16 @@ type HudCallbacks = {
 export class HudOverlay {
   private readonly root: HTMLElement;
   private readonly callbacks: HudCallbacks;
+  private readonly scoreLeft: HTMLElement;
+  private readonly scoreRight: HTMLElement;
+  private readonly arenaName: HTMLElement;
+  private readonly panel: HTMLElement;
+  private readonly title: HTMLElement;
+  private readonly subtitle: HTMLElement;
+  private readonly start: HTMLButtonElement;
+  private readonly pause: HTMLButtonElement;
+  private readonly mute: HTMLButtonElement;
+  private lastSignature = "";
   private muted = false;
 
   constructor(root: HTMLElement, callbacks: HudCallbacks) {
@@ -39,6 +49,16 @@ export class HudOverlay {
       </section>
     `;
 
+    this.scoreLeft = this.queryRequired("[data-score-left]");
+    this.scoreRight = this.queryRequired("[data-score-right]");
+    this.arenaName = this.queryRequired("[data-arena-name]");
+    this.panel = this.queryRequired("[data-panel]");
+    this.title = this.queryRequired("[data-title]");
+    this.subtitle = this.queryRequired("[data-subtitle]");
+    this.start = this.queryRequired('[data-action="start"]');
+    this.pause = this.queryRequired('[data-action="pause"]');
+    this.mute = this.queryRequired('[data-action="mute"]');
+
     this.root.addEventListener("click", (event) => {
       const target = event.target as HTMLElement;
       const action = target.closest<HTMLElement>("[data-action]")?.dataset.action;
@@ -57,46 +77,49 @@ export class HudOverlay {
   }
 
   update(match: MatchState, arena: ArenaAsset): void {
-    this.setText("[data-score-left]", String(match.scores.left));
-    this.setText("[data-score-right]", String(match.scores.right));
-    this.setText("[data-arena-name]", arena.label);
+    const signature = [
+      match.phase,
+      match.scores.left,
+      match.scores.right,
+      match.winner ?? "",
+      arena.key,
+      this.muted ? "muted" : "sound"
+    ].join("|");
 
-    const panel = this.root.querySelector<HTMLElement>("[data-panel]");
-    const title = this.root.querySelector<HTMLElement>("[data-title]");
-    const subtitle = this.root.querySelector<HTMLElement>("[data-subtitle]");
-    const start = this.root.querySelector<HTMLButtonElement>('[data-action="start"]');
-    const pause = this.root.querySelector<HTMLButtonElement>('[data-action="pause"]');
-
-    if (!panel || !title || !subtitle || !start || !pause) {
+    if (signature === this.lastSignature) {
       return;
     }
 
+    this.lastSignature = signature;
+    this.scoreLeft.textContent = String(match.scores.left);
+    this.scoreRight.textContent = String(match.scores.right);
+    this.arenaName.textContent = arena.label;
     this.root.dataset.phase = match.phase;
-    pause.textContent = match.phase === "paused" ? "▶" : "II";
-    pause.setAttribute("aria-label", match.phase === "paused" ? "Resume" : "Pause");
+    this.pause.textContent = match.phase === "paused" ? ">" : "II";
+    this.pause.setAttribute("aria-label", match.phase === "paused" ? "Resume" : "Pause");
 
     if (match.phase === "ready") {
-      title.textContent = "Neon Pong";
-      subtitle.textContent = "Drag, touch, or use the keyboard to bend the rally.";
-      start.textContent = "Start match";
-      panel.hidden = false;
+      this.title.textContent = "Neon Pong";
+      this.subtitle.textContent = "Drag, touch, or use the keyboard to bend the rally.";
+      this.start.textContent = "Start match";
+      this.panel.hidden = false;
     } else if (match.phase === "paused") {
-      title.textContent = "Paused";
-      subtitle.textContent = "The rally is frozen. Resume when ready.";
-      start.textContent = "Resume";
-      panel.hidden = false;
+      this.title.textContent = "Paused";
+      this.subtitle.textContent = "The rally is frozen. Resume when ready.";
+      this.start.textContent = "Resume";
+      this.panel.hidden = false;
     } else if (match.phase === "gameOver") {
-      title.textContent = `${match.winner === "left" ? "Player" : "AI"} wins`;
-      subtitle.textContent = "Start a rematch with a fresh random arena.";
-      start.textContent = "Rematch";
-      panel.hidden = false;
+      this.title.textContent = `${match.winner === "left" ? "Player" : "AI"} wins`;
+      this.subtitle.textContent = "Start a rematch with a fresh random arena.";
+      this.start.textContent = "Rematch";
+      this.panel.hidden = false;
     } else {
-      panel.hidden = true;
+      this.panel.hidden = true;
     }
   }
 
   flashScore(side: "left" | "right"): void {
-    const element = this.root.querySelector<HTMLElement>(`[data-score-${side}]`);
+    const element = side === "left" ? this.scoreLeft : this.scoreRight;
     element?.animate(
       [
         { transform: "scale(1)", textShadow: "0 0 12px rgba(255,255,255,0.65)" },
@@ -110,20 +133,20 @@ export class HudOverlay {
   destroy(): void {
     this.root.innerHTML = "";
     this.root.className = "";
+    this.lastSignature = "";
   }
 
-  private setText(selector: string, text: string): void {
-    const element = this.root.querySelector(selector);
-    if (element) {
-      element.textContent = text;
+  private queryRequired<T extends HTMLElement>(selector: string): T {
+    const element = this.root.querySelector<T>(selector);
+    if (!element) {
+      throw new Error(`Missing HUD element: ${selector}`);
     }
+    return element;
   }
 
   private updateMuteButton(): void {
-    const button = this.root.querySelector<HTMLButtonElement>('[data-action="mute"]');
-    if (button) {
-      button.textContent = this.muted ? "M" : "S";
-      button.setAttribute("aria-label", this.muted ? "Unmute" : "Mute");
-    }
+    this.mute.textContent = this.muted ? "M" : "S";
+    this.mute.setAttribute("aria-label", this.muted ? "Unmute" : "Mute");
+    this.lastSignature = "";
   }
 }

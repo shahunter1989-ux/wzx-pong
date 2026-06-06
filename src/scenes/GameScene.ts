@@ -20,6 +20,13 @@ import type { EffectEvent, InputAction, MatchState, Side } from "../game/types";
 import { HudOverlay } from "../ui/HudOverlay";
 
 type PaddleViews = Record<Side, Phaser.GameObjects.Rectangle>;
+type BootData = {
+  initialArenaKey?: string;
+};
+type EffectProfile = {
+  isMobile: boolean;
+  quality: "balanced" | "reduced";
+};
 
 export class GameScene extends Phaser.Scene {
   private match!: MatchState;
@@ -36,27 +43,35 @@ export class GameScene extends Phaser.Scene {
   private pointerTargetY?: number;
   private pointerActive = false;
   private lastArenaKey?: string;
+  private effectProfile!: EffectProfile;
+  private frameSamples = 0;
+  private slowFrames = 0;
 
   constructor() {
     super("GameScene");
   }
 
+  init(data: BootData): void {
+    this.arena = ARENAS.find((arena) => arena.key === data.initialArenaKey) ?? getRandomArena();
+    this.lastArenaKey = this.arena.key;
+  }
+
   create(): void {
     this.match = createMatchState();
-    this.arena = getRandomArena();
-    this.lastArenaKey = this.arena.key;
+    this.effectProfile = this.createEffectProfile();
     this.createWorld();
     this.createInput();
     this.createHud();
     this.syncViews(true);
+    this.lazyLoadRemainingArenas();
   }
 
   update(_time: number, deltaMs: number): void {
+    this.trackFrameTiming(deltaMs);
     const input = this.readInput();
     const effects = stepMatch(this.match, input, deltaMs / 1000);
     this.syncViews(false);
     this.handleEffects(effects);
-    this.hud?.update(this.match, this.arena);
   }
 
   private createWorld(): void {
@@ -65,8 +80,8 @@ export class GameScene extends Phaser.Scene {
     this.background.setDisplaySize(FIELD_WIDTH, FIELD_HEIGHT);
     this.background.setDepth(0);
 
-    this.add.rectangle(FIELD_CENTER_X, FIELD_CENTER_Y, 2, FIELD_HEIGHT - 180, 0x5ee7ff, 0.36).setDepth(1);
-    this.add.rectangle(FIELD_CENTER_X, FIELD_CENTER_Y, FIELD_WIDTH - 90, FIELD_HEIGHT - 145, 0x0d1f36, 0.08).setDepth(1);
+    this.add.rectangle(FIELD_CENTER_X, FIELD_CENTER_Y, 2, FIELD_HEIGHT - 108, 0x5ee7ff, 0.36).setDepth(1);
+    this.add.rectangle(FIELD_CENTER_X, FIELD_CENTER_Y, FIELD_WIDTH - 54, FIELD_HEIGHT - 87, 0x0d1f36, 0.08).setDepth(1);
 
     this.paddles = {
       left: this.createPaddleView(this.arena.leftColor),
@@ -156,7 +171,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private syncViews(forceBackground: boolean): void {
-    if (forceBackground || this.background.texture.key !== this.arena.key) {
+    if ((forceBackground || this.background.texture.key !== this.arena.key) && this.textures.exists(this.arena.key)) {
       this.background.setTexture(this.arena.key);
     }
 
@@ -181,6 +196,10 @@ export class GameScene extends Phaser.Scene {
       } else {
         this.hud?.flashScore(effect.side);
       }
+    }
+
+    if (effects.length > 0) {
+      this.hud?.update(this.match, this.arena);
     }
   }
 
@@ -212,21 +231,25 @@ export class GameScene extends Phaser.Scene {
       }
     });
 
-    this.cameras.main.shake(80, 0.0025 * effect.intensity);
-    this.spawnSparkBurst(effect.x, effect.y, color, 24, effect.side === "left" ? 0 : Math.PI);
-    this.spawnRing(effect.x, effect.y, color, 82);
+    const effectScale = this.getEffectScale();
+    if (!this.effectProfile.isMobile || this.effectProfile.quality !== "reduced") {
+      this.cameras.main.shake(60, 0.0016 * effect.intensity * effectScale);
+    }
+    this.spawnSparkBurst(effect.x, effect.y, color, this.effectProfile.isMobile ? 11 : 18, effect.side === "left" ? 0 : Math.PI);
+    this.spawnRing(effect.x, effect.y, color, 49 * effectScale);
   }
 
   private playWallBounce(effect: Extract<EffectEvent, { type: "wall-bounce" }>): void {
-    this.spawnSparkBurst(effect.x, effect.y, 0x8efaff, 10, effect.y < FIELD_CENTER_Y ? Math.PI / 2 : -Math.PI / 2);
-    this.spawnRing(effect.x, effect.y, 0x8efaff, 46);
+    const effectScale = this.getEffectScale();
+    this.spawnSparkBurst(effect.x, effect.y, 0x8efaff, this.effectProfile.isMobile ? 5 : 8, effect.y < FIELD_CENTER_Y ? Math.PI / 2 : -Math.PI / 2);
+    this.spawnRing(effect.x, effect.y, 0x8efaff, 28 * effectScale);
   }
 
   private spawnSparkBurst(x: number, y: number, color: number, count: number, direction: number): void {
     for (let index = 0; index < count; index += 1) {
       const angle = direction + (Math.random() - 0.5) * Math.PI * 0.82;
-      const distance = Phaser.Math.Between(34, 112);
-      const spark = this.add.circle(x, y, Phaser.Math.FloatBetween(2.8, 7.5), color, 0.92);
+      const distance = Phaser.Math.Between(20, 67) * this.getEffectScale();
+      const spark = this.add.circle(x, y, Phaser.Math.FloatBetween(1.8, 4.6), color, 0.9);
       spark.setBlendMode(Phaser.BlendModes.ADD);
       spark.setDepth(8);
       this.tweens.add({
@@ -274,7 +297,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private restartWithRandomArena(): void {
-    this.arena = getRandomArena(this.lastArenaKey);
+    this.arena = this.getRandomLoadedArena();
     this.lastArenaKey = this.arena.key;
     restartMatch(this.match);
     this.background.setTexture(this.arena.key);
@@ -289,10 +312,66 @@ export class GameScene extends Phaser.Scene {
     const worldPoint = camera.getWorldPoint(FIELD_WIDTH * 0.18, screenY);
     return Phaser.Math.Clamp(worldPoint.y, 0, FIELD_HEIGHT);
   }
+
+  private lazyLoadRemainingArenas(): void {
+    const remaining = ARENAS.filter((arena) => arena.key !== this.arena.key && !this.textures.exists(arena.key));
+    if (remaining.length === 0) {
+      return;
+    }
+
+    for (const arena of remaining) {
+      this.load.image(arena.key, arena.url);
+    }
+    this.load.start();
+  }
+
+  private getRandomLoadedArena(): ArenaAsset {
+    const loaded = ARENAS.filter((arena) => this.textures.exists(arena.key));
+    const candidates = loaded.filter((arena) => arena.key !== this.lastArenaKey);
+    const pool = candidates.length > 0 ? candidates : loaded;
+    return pool[Math.floor(Math.random() * pool.length)] ?? this.arena;
+  }
+
+  private createEffectProfile(): EffectProfile {
+    const isMobile =
+      window.matchMedia("(pointer: coarse)").matches ||
+      window.innerWidth <= 720 ||
+      this.game.device.os.android ||
+      this.game.device.os.iOS;
+
+    return {
+      isMobile,
+      quality: isMobile ? "reduced" : "balanced"
+    };
+  }
+
+  private trackFrameTiming(deltaMs: number): void {
+    this.frameSamples += 1;
+    if (deltaMs > 33.4) {
+      this.slowFrames += 1;
+    }
+
+    if (this.frameSamples < 120) {
+      return;
+    }
+
+    if (this.slowFrames > 14) {
+      this.effectProfile.quality = "reduced";
+    } else if (!this.effectProfile.isMobile) {
+      this.effectProfile.quality = "balanced";
+    }
+
+    this.frameSamples = 0;
+    this.slowFrames = 0;
+  }
+
+  private getEffectScale(): number {
+    return this.effectProfile.quality === "reduced" ? 0.68 : 1;
+  }
 }
 
 export const gameConfig: Phaser.Types.Core.GameConfig = {
-  type: Phaser.AUTO,
+  type: Phaser.CANVAS,
   parent: "game",
   width: FIELD_WIDTH,
   height: FIELD_HEIGHT,
