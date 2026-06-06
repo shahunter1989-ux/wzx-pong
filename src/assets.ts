@@ -6,32 +6,34 @@ export type ArenaAsset = {
   rightColor: number;
 };
 
+const assetUrl = (path: string) => `${import.meta.env.BASE_URL}${path}`;
+
 export const ARENAS: ArenaAsset[] = [
   {
     key: "arena-cyan-tech",
     label: "Cyan Tech",
-    url: "/assets/arenas/arena-cyan-tech.png",
+    url: assetUrl("assets/arenas/arena-cyan-tech.png"),
     leftColor: 0x18c8ff,
     rightColor: 0x18c8ff
   },
   {
     key: "arena-pink-cyan-grid",
     label: "Pink Cyan Grid",
-    url: "/assets/arenas/arena-pink-cyan-grid.png",
+    url: assetUrl("assets/arenas/arena-pink-cyan-grid.png"),
     leftColor: 0x1fd4ff,
     rightColor: 0xff45c9
   },
   {
     key: "arena-green-cyan",
     label: "Green Cyan",
-    url: "/assets/arenas/arena-green-cyan.png",
+    url: assetUrl("assets/arenas/arena-green-cyan.png"),
     leftColor: 0x7cff4c,
     rightColor: 0x28f0ff
   },
   {
     key: "arena-retro-horizon",
     label: "Retro Horizon",
-    url: "/assets/arenas/arena-retro-horizon.png",
+    url: assetUrl("assets/arenas/arena-retro-horizon.png"),
     leftColor: 0xff3dcc,
     rightColor: 0x438dff
   }
@@ -39,7 +41,7 @@ export const ARENAS: ArenaAsset[] = [
 
 export const BALL_ASSET = {
   key: "wzx-ball",
-  url: "/assets/ball/wzx-ball.png"
+  url: assetUrl("assets/ball/wzx-ball.png")
 };
 
 export function getRandomArena(previousKey?: string): ArenaAsset {
