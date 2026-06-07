@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { ARENAS, type ArenaAsset, BALL_ASSET, getRandomArena } from "../assets";
+import { ARENAS, BALLS, type ArenaAsset, type BallAsset, getRandomArena, getRandomBall } from "../assets";
 import {
   BALL_RADIUS,
   FIELD_CENTER_X,
@@ -22,6 +22,7 @@ import { HudOverlay } from "../ui/HudOverlay";
 type PaddleViews = Record<Side, Phaser.GameObjects.Rectangle>;
 type BootData = {
   initialArenaKey?: string;
+  initialBallKey?: string;
 };
 type EffectProfile = {
   isMobile: boolean;
@@ -31,6 +32,7 @@ type EffectProfile = {
 export class GameScene extends Phaser.Scene {
   private match!: MatchState;
   private arena!: ArenaAsset;
+  private ballAsset!: BallAsset;
   private background!: Phaser.GameObjects.Image;
   private ball!: Phaser.GameObjects.Image;
   private ballGlow!: Phaser.GameObjects.Arc;
@@ -43,6 +45,7 @@ export class GameScene extends Phaser.Scene {
   private pointerTargetY?: number;
   private pointerActive = false;
   private lastArenaKey?: string;
+  private lastBallKey?: string;
   private effectProfile!: EffectProfile;
   private frameSamples = 0;
   private slowFrames = 0;
@@ -53,7 +56,9 @@ export class GameScene extends Phaser.Scene {
 
   init(data: BootData): void {
     this.arena = ARENAS.find((arena) => arena.key === data.initialArenaKey) ?? getRandomArena();
+    this.ballAsset = BALLS.find((ball) => ball.key === data.initialBallKey) ?? getRandomBall();
     this.lastArenaKey = this.arena.key;
+    this.lastBallKey = this.ballAsset.key;
   }
 
   create(): void {
@@ -92,9 +97,8 @@ export class GameScene extends Phaser.Scene {
     this.ballGlow.setBlendMode(Phaser.BlendModes.ADD);
     this.ballGlow.setDepth(4);
 
-    this.ball = this.add.image(FIELD_CENTER_X, FIELD_CENTER_Y, BALL_ASSET.key);
-    this.ballBaseScale = (BALL_RADIUS * 2.55) / this.ball.width;
-    this.ball.setScale(this.ballBaseScale);
+    this.ball = this.add.image(FIELD_CENTER_X, FIELD_CENTER_Y, this.ballAsset.key);
+    this.applyBallTexture(this.ballAsset.key);
     this.ball.setBlendMode(Phaser.BlendModes.SCREEN);
     this.ball.setDepth(6);
 
@@ -298,9 +302,12 @@ export class GameScene extends Phaser.Scene {
 
   private restartWithRandomArena(): void {
     this.arena = this.getRandomLoadedArena();
+    this.ballAsset = this.getRandomLoadedBall();
     this.lastArenaKey = this.arena.key;
+    this.lastBallKey = this.ballAsset.key;
     restartMatch(this.match);
     this.background.setTexture(this.arena.key);
+    this.applyBallTexture(this.ballAsset.key);
     this.paddles.left.setFillStyle(this.arena.leftColor, 0.9);
     this.paddles.right.setFillStyle(this.arena.rightColor, 0.9);
     this.syncViews(true);
@@ -314,13 +321,17 @@ export class GameScene extends Phaser.Scene {
   }
 
   private lazyLoadRemainingArenas(): void {
-    const remaining = ARENAS.filter((arena) => arena.key !== this.arena.key && !this.textures.exists(arena.key));
-    if (remaining.length === 0) {
+    const remainingArenas = ARENAS.filter((arena) => arena.key !== this.arena.key && !this.textures.exists(arena.key));
+    const remainingBalls = BALLS.filter((ball) => ball.key !== this.ballAsset.key && !this.textures.exists(ball.key));
+    if (remainingArenas.length === 0 && remainingBalls.length === 0) {
       return;
     }
 
-    for (const arena of remaining) {
+    for (const arena of remainingArenas) {
       this.load.image(arena.key, arena.url);
+    }
+    for (const ball of remainingBalls) {
+      this.load.image(ball.key, ball.url);
     }
     this.load.start();
   }
@@ -330,6 +341,23 @@ export class GameScene extends Phaser.Scene {
     const candidates = loaded.filter((arena) => arena.key !== this.lastArenaKey);
     const pool = candidates.length > 0 ? candidates : loaded;
     return pool[Math.floor(Math.random() * pool.length)] ?? this.arena;
+  }
+
+  private getRandomLoadedBall(): BallAsset {
+    const loaded = BALLS.filter((ball) => this.textures.exists(ball.key));
+    const candidates = loaded.filter((ball) => ball.key !== this.lastBallKey);
+    const pool = candidates.length > 0 ? candidates : loaded;
+    return pool[Math.floor(Math.random() * pool.length)] ?? this.ballAsset;
+  }
+
+  private applyBallTexture(key: string): void {
+    if (!this.textures.exists(key)) {
+      return;
+    }
+
+    this.ball.setTexture(key);
+    this.ballBaseScale = (BALL_RADIUS * 2.55) / this.ball.width;
+    this.ball.setScale(this.ballBaseScale);
   }
 
   private createEffectProfile(): EffectProfile {
