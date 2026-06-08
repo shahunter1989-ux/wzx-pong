@@ -5,7 +5,7 @@ type HudCallbacks = {
   onStart: () => void;
   onPause: () => void;
   onRestart: () => void;
-  onMute: () => void;
+  onMute: () => boolean;
 };
 
 export class HudOverlay {
@@ -21,11 +21,12 @@ export class HudOverlay {
   private readonly pause: HTMLButtonElement;
   private readonly mute: HTMLButtonElement;
   private lastSignature = "";
-  private muted = false;
+  private muted: boolean;
 
-  constructor(root: HTMLElement, callbacks: HudCallbacks) {
+  constructor(root: HTMLElement, callbacks: HudCallbacks, initialMuted = false) {
     this.root = root;
     this.callbacks = callbacks;
+    this.muted = initialMuted;
     this.root.className = "hud";
     this.root.innerHTML = `
       <section class="hud__top" aria-live="polite">
@@ -58,6 +59,7 @@ export class HudOverlay {
     this.start = this.queryRequired('[data-action="start"]');
     this.pause = this.queryRequired('[data-action="pause"]');
     this.mute = this.queryRequired('[data-action="mute"]');
+    this.updateMuteButton();
 
     this.root.addEventListener("click", (event) => {
       const target = event.target as HTMLElement;
@@ -69,8 +71,7 @@ export class HudOverlay {
       } else if (action === "restart") {
         this.callbacks.onRestart();
       } else if (action === "mute") {
-        this.muted = !this.muted;
-        this.callbacks.onMute();
+        this.muted = this.callbacks.onMute();
         this.updateMuteButton();
       }
     });

@@ -1,4 +1,5 @@
 import Phaser from "phaser";
+import { AudioController } from "../audio/AudioController";
 import { ARENAS, BALLS, type ArenaAsset, type BallAsset, getRandomArena, getRandomBall } from "../assets";
 import {
   BALL_RADIUS,
@@ -49,6 +50,7 @@ export class GameScene extends Phaser.Scene {
   private effectProfile!: EffectProfile;
   private frameSamples = 0;
   private slowFrames = 0;
+  private readonly audio = new AudioController();
 
   constructor() {
     super("GameScene");
@@ -69,6 +71,7 @@ export class GameScene extends Phaser.Scene {
     this.createHud();
     this.syncViews(true);
     this.lazyLoadRemainingArenas();
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.audio.destroy());
   }
 
   update(_time: number, deltaMs: number): void {
@@ -154,8 +157,8 @@ export class GameScene extends Phaser.Scene {
       onStart: () => this.handlePrimaryAction(),
       onPause: () => this.pauseOrResume(),
       onRestart: () => this.restartWithRandomArena(),
-      onMute: () => undefined
-    });
+      onMute: () => this.toggleMute()
+    }, this.audio.isMuted);
     this.hud.update(this.match, this.arena);
   }
 
@@ -194,12 +197,19 @@ export class GameScene extends Phaser.Scene {
   private handleEffects(effects: EffectEvent[]): void {
     for (const effect of effects) {
       if (effect.type === "paddle-hit") {
+        this.audio.playPaddleHit(effect.side, effect.intensity);
         this.playPaddleHit(effect);
       } else if (effect.type === "wall-bounce") {
+        this.audio.playWallBounce();
         this.playWallBounce(effect);
       } else {
+        this.audio.playScore(effect.side);
         this.hud?.flashScore(effect.side);
       }
+    }
+
+    if (this.match.phase === "gameOver") {
+      this.audio.pauseMusic();
     }
 
     if (effects.length > 0) {
@@ -285,10 +295,16 @@ export class GameScene extends Phaser.Scene {
   }
 
   private handlePrimaryAction(): void {
+    void this.audio.unlock();
+
     if (this.match.phase === "ready") {
       startMatch(this.match);
+      this.audio.playUi("start");
+      this.audio.startMusic();
     } else if (this.match.phase === "paused") {
       togglePause(this.match);
+      this.audio.playUi("start");
+      this.audio.startMusic();
     } else if (this.match.phase === "gameOver") {
       this.restartWithRandomArena();
     }
@@ -296,11 +312,20 @@ export class GameScene extends Phaser.Scene {
   }
 
   private pauseOrResume(): void {
+    void this.audio.unlock();
     togglePause(this.match);
+    if (this.match.phase === "paused") {
+      this.audio.playUi("pause");
+      this.audio.pauseMusic();
+    } else if (this.match.phase === "playing") {
+      this.audio.playUi("start");
+      this.audio.startMusic();
+    }
     this.hud?.update(this.match, this.arena);
   }
 
   private restartWithRandomArena(): void {
+    void this.audio.unlock();
     this.arena = this.getRandomLoadedArena();
     this.ballAsset = this.getRandomLoadedBall();
     this.lastArenaKey = this.arena.key;
@@ -311,7 +336,21 @@ export class GameScene extends Phaser.Scene {
     this.paddles.left.setFillStyle(this.arena.leftColor, 0.9);
     this.paddles.right.setFillStyle(this.arena.rightColor, 0.9);
     this.syncViews(true);
+    this.audio.playUi("restart");
+    this.audio.startMusic();
     this.hud?.update(this.match, this.arena);
+  }
+
+  private toggleMute(): boolean {
+    const willMute = !this.audio.isMuted;
+    if (willMute) {
+      this.audio.playUi("mute");
+    }
+    const muted = this.audio.toggleMuted();
+    if (!muted) {
+      this.audio.playUi("mute");
+    }
+    return muted;
   }
 
   private screenToWorldY(screenY: number): number {
