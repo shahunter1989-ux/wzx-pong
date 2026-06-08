@@ -10,10 +10,10 @@ export const PADDLE_WIDTH = 16;
 export const PADDLE_HEIGHT = 114;
 export const PADDLE_INSET = 55;
 export const PLAYER_SPEED = 612;
-export const AI_SPEED = 372;
-export const AI_REACTION = 4.8;
-export const AI_DEAD_ZONE = 26;
-export const AI_PREDICTION_ERROR = 58;
+export const AI_SPEED = 348;
+export const AI_REACTION = 4.15;
+export const AI_DEAD_ZONE = 34;
+export const AI_PREDICTION_ERROR = 76;
 
 export const BALL_RADIUS = 23;
 export const BALL_START_SPEED = 351;

@@ -34,7 +34,7 @@ export class HudOverlay {
     this.root.innerHTML = `
       <section class="hud__intro" data-intro-screen data-action="intro-start">
         <img class="hud__intro-image" src="${introImageUrl}" alt="WZX Neon Pong intro screen" />
-        <div class="hud__intro-prompt">Press Tab or tap to start</div>
+        <div class="hud__intro-prompt">Tap to start</div>
       </section>
       <section class="hud__top" aria-live="polite">
         <div class="hud__score"><span data-score-left>0</span><i></i><span data-score-right>0</span></div>

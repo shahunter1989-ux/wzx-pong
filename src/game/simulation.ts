@@ -147,12 +147,12 @@ function updateAiPaddle(paddle: PaddleState, ball: BallState, rally: number, dt:
   const predictionError =
     Math.sin(ball.x * 0.027 + ball.y * 0.014 + ball.spin * 1.8 + rally * 0.41) *
     AI_PREDICTION_ERROR *
-    (0.62 + pressure * 0.38);
+    (0.74 + pressure * 0.48);
   const targetY = isThreatened ? predictedY + predictionError : FIELD_CENTER_Y;
   const error = targetY - paddle.y;
 
   if (Math.abs(error) > AI_DEAD_ZONE) {
-    const reaction = isThreatened ? AI_REACTION * (0.78 + (1 - pressure) * 0.16) : AI_REACTION * 0.52;
+    const reaction = isThreatened ? AI_REACTION * (0.7 + (1 - pressure) * 0.14) : AI_REACTION * 0.48;
     const easedStep = error * Math.min(1, reaction * dt);
     paddle.y += clamp(easedStep, -AI_SPEED * dt, AI_SPEED * dt);
   }
