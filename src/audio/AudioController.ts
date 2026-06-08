@@ -2,7 +2,7 @@ type WebKitAudioWindow = Window & {
   webkitAudioContext?: typeof AudioContext;
 };
 
-type UiTone = "start" | "pause" | "restart" | "mute";
+type UiTone = "start" | "pause" | "restart" | "mute" | "countdown" | "go";
 
 const STORAGE_KEY = "wzx-pong-muted";
 const MASTER_VOLUME = 0.72;
@@ -102,7 +102,9 @@ export class AudioController {
       start: 523.25,
       pause: 261.63,
       restart: 659.25,
-      mute: 392
+      mute: 392,
+      countdown: 440,
+      go: 880
     };
     this.playTone({
       frequency: frequencies[tone],

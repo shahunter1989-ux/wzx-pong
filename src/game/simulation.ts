@@ -1,12 +1,10 @@
 import {
-  AI_DEAD_ZONE,
-  AI_PREDICTION_ERROR,
-  AI_REACTION,
-  AI_SPEED,
+  AI_DIFFICULTY_PRESETS,
   BALL_MAX_SPEED,
   BALL_RADIUS,
   BALL_SPEEDUP,
   BALL_START_SPEED,
+  DEFAULT_MATCH_CONFIG,
   FIELD_CENTER_X,
   FIELD_CENTER_Y,
   FIELD_WIDTH,
@@ -20,7 +18,7 @@ import {
   WALL_BOTTOM,
   WALL_TOP
 } from "./constants";
-import type { BallState, EffectEvent, InputAction, MatchState, PaddleState, Side } from "./types";
+import type { BallState, Difficulty, EffectEvent, InputAction, MatchConfig, MatchState, PaddleState, Side } from "./types";
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 const signForSide = (side: Side) => (side === "left" ? 1 : -1);
@@ -50,10 +48,11 @@ function createServedBall(serveSide: Side): BallState {
   };
 }
 
-export function createMatchState(): MatchState {
+export function createMatchState(config: MatchConfig = DEFAULT_MATCH_CONFIG): MatchState {
   const serveSide: Side = Math.random() > 0.5 ? "left" : "right";
   return {
     phase: "ready",
+    config,
     paddles: {
       left: createPaddle("left"),
       right: createPaddle("right")
@@ -66,29 +65,49 @@ export function createMatchState(): MatchState {
     scoreLimit: SCORE_LIMIT,
     rally: 0,
     serveSide,
-    hitStopRemaining: 0
+    hitStopRemaining: 0,
+    stats: {
+      elapsedSeconds: 0,
+      longestRally: 0,
+      totalHits: 0
+    }
   };
 }
 
-export function startMatch(match: MatchState): void {
-  match.phase = "playing";
+export function startMatch(match: MatchState, config: MatchConfig = match.config): void {
+  match.config = config;
+  match.scores.left = 0;
+  match.scores.right = 0;
+  match.winner = undefined;
+  match.stats.elapsedSeconds = 0;
+  match.stats.longestRally = 0;
+  match.stats.totalHits = 0;
   resetRound(match, match.serveSide);
+  match.phase = "countdown";
 }
 
-export function restartMatch(match: MatchState): void {
-  const fresh = createMatchState();
+export function finishCountdown(match: MatchState): void {
+  if (match.phase === "countdown") {
+    match.phase = "playing";
+  }
+}
+
+export function restartMatch(match: MatchState, config: MatchConfig = match.config): void {
+  const fresh = createMatchState(config);
   Object.assign(match, fresh);
-  startMatch(match);
+  startMatch(match, config);
 }
 
 export function togglePause(match: MatchState): void {
-  if (match.phase === "playing") {
+  if (match.phase === "playing" || match.phase === "countdown") {
+    match.pauseReturnPhase = match.phase;
     match.phase = "paused";
     return;
   }
 
   if (match.phase === "paused") {
-    match.phase = "playing";
+    match.phase = match.pauseReturnPhase ?? "playing";
+    match.pauseReturnPhase = undefined;
   }
 }
 
@@ -104,33 +123,49 @@ export function resetRound(match: MatchState, serveSide: Side): void {
 }
 
 export function stepMatch(match: MatchState, input: InputAction, dtSeconds: number): EffectEvent[] {
-  if (match.phase !== "playing") {
+  if (match.phase !== "playing" && match.phase !== "countdown") {
     return [];
   }
 
   const effects: EffectEvent[] = [];
   const dt = clamp(dtSeconds, 0, 1 / 30);
 
+  updatePaddles(match, input, dt);
+
+  if (match.phase === "countdown") {
+    return effects;
+  }
+
+  match.stats.elapsedSeconds += dt;
+
   if (match.hitStopRemaining > 0) {
     match.hitStopRemaining = Math.max(0, match.hitStopRemaining - dt);
     return effects;
   }
 
-  updatePlayerPaddle(match.paddles.left, input, dt);
-  updateAiPaddle(match.paddles.right, match.ball, match.rally, dt);
   updateBall(match, dt, effects);
 
   return effects;
 }
 
-function updatePlayerPaddle(paddle: PaddleState, input: InputAction, dt: number): void {
+function updatePaddles(match: MatchState, input: InputAction, dt: number): void {
+  updatePlayerPaddle(match.paddles.left, input.leftDirection, input.leftTargetY, dt);
+
+  if (match.config.mode === "twoPlayer") {
+    updatePlayerPaddle(match.paddles.right, input.rightDirection, input.rightTargetY, dt);
+  } else {
+    updateAiPaddle(match.paddles.right, match.ball, match.rally, match.config.difficulty, dt);
+  }
+}
+
+function updatePlayerPaddle(paddle: PaddleState, direction: -1 | 0 | 1, targetY: number | undefined, dt: number): void {
   const previousY = paddle.y;
 
-  if (input.playerDirection !== 0) {
-    paddle.y += input.playerDirection * PLAYER_SPEED * dt;
-  } else if (input.playerTargetY !== undefined) {
-    const targetY = clamp(input.playerTargetY, WALL_TOP + paddle.height / 2, WALL_BOTTOM - paddle.height / 2);
-    const delta = targetY - paddle.y;
+  if (direction !== 0) {
+    paddle.y += direction * PLAYER_SPEED * dt;
+  } else if (targetY !== undefined) {
+    const clampedTargetY = clamp(targetY, WALL_TOP + paddle.height / 2, WALL_BOTTOM - paddle.height / 2);
+    const delta = clampedTargetY - paddle.y;
     const maxStep = PLAYER_SPEED * dt;
     paddle.y += clamp(delta, -maxStep, maxStep);
   }
@@ -139,22 +174,23 @@ function updatePlayerPaddle(paddle: PaddleState, input: InputAction, dt: number)
   paddle.velocityY = (paddle.y - previousY) / Math.max(dt, 0.0001);
 }
 
-function updateAiPaddle(paddle: PaddleState, ball: BallState, rally: number, dt: number): void {
+function updateAiPaddle(paddle: PaddleState, ball: BallState, rally: number, difficulty: Difficulty, dt: number): void {
   const previousY = paddle.y;
+  const preset = AI_DIFFICULTY_PRESETS[difficulty];
   const isThreatened = ball.vx > 0;
   const predictedY = predictBallY(ball, paddle.x);
   const pressure = clamp(ball.speed / BALL_MAX_SPEED, 0, 1);
   const predictionError =
     Math.sin(ball.x * 0.027 + ball.y * 0.014 + ball.spin * 1.8 + rally * 0.41) *
-    AI_PREDICTION_ERROR *
+    preset.predictionError *
     (0.74 + pressure * 0.48);
   const targetY = isThreatened ? predictedY + predictionError : FIELD_CENTER_Y;
   const error = targetY - paddle.y;
 
-  if (Math.abs(error) > AI_DEAD_ZONE) {
-    const reaction = isThreatened ? AI_REACTION * (0.7 + (1 - pressure) * 0.14) : AI_REACTION * 0.48;
+  if (Math.abs(error) > preset.deadZone) {
+    const reaction = isThreatened ? preset.reaction * (0.7 + (1 - pressure) * 0.14) : preset.reaction * 0.48;
     const easedStep = error * Math.min(1, reaction * dt);
-    paddle.y += clamp(easedStep, -AI_SPEED * dt, AI_SPEED * dt);
+    paddle.y += clamp(easedStep, -preset.speed * dt, preset.speed * dt);
   }
 
   paddle.y = clamp(paddle.y, WALL_TOP + paddle.height / 2, WALL_BOTTOM - paddle.height / 2);
@@ -240,6 +276,8 @@ function resolvePaddleCollision(match: MatchState, side: Side, effects: EffectEv
   ball.spin = impactOffset * 2.3 + paddle.velocityY / 1500;
   ball.x = side === "left" ? paddleRight + ball.radius : paddleLeft - ball.radius;
   match.rally += 1;
+  match.stats.totalHits += 1;
+  match.stats.longestRally = Math.max(match.stats.longestRally, match.rally);
   match.hitStopRemaining = HIT_STOP_SECONDS;
 
   effects.push({
@@ -262,4 +300,5 @@ function awardPoint(match: MatchState, side: Side, effects: EffectEvent[]): void
   }
 
   resetRound(match, side === "left" ? "right" : "left");
+  match.phase = "countdown";
 }

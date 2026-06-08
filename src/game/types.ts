@@ -1,6 +1,15 @@
 export type Side = "left" | "right";
 
-export type MatchPhase = "ready" | "playing" | "paused" | "gameOver";
+export type GameMode = "ai" | "twoPlayer";
+
+export type Difficulty = "easy" | "normal" | "hard";
+
+export type MatchPhase = "ready" | "countdown" | "playing" | "paused" | "gameOver";
+
+export type MatchConfig = {
+  mode: GameMode;
+  difficulty: Difficulty;
+};
 
 export type PaddleState = {
   side: Side;
@@ -23,6 +32,8 @@ export type BallState = {
 
 export type MatchState = {
   phase: MatchPhase;
+  pauseReturnPhase?: "countdown" | "playing";
+  config: MatchConfig;
   paddles: Record<Side, PaddleState>;
   ball: BallState;
   scores: Record<Side, number>;
@@ -31,11 +42,20 @@ export type MatchState = {
   serveSide: Side;
   winner?: Side;
   hitStopRemaining: number;
+  stats: MatchStats;
+};
+
+export type MatchStats = {
+  elapsedSeconds: number;
+  longestRally: number;
+  totalHits: number;
 };
 
 export type InputAction = {
-  playerDirection: -1 | 0 | 1;
-  playerTargetY?: number;
+  leftDirection: -1 | 0 | 1;
+  leftTargetY?: number;
+  rightDirection: -1 | 0 | 1;
+  rightTargetY?: number;
 };
 
 export type EffectEvent =

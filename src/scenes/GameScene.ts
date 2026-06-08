@@ -11,6 +11,7 @@ import {
 } from "../assets";
 import {
   BALL_RADIUS,
+  DEFAULT_MATCH_CONFIG,
   FIELD_CENTER_X,
   FIELD_CENTER_Y,
   FIELD_HEIGHT,
@@ -20,13 +21,14 @@ import {
 } from "../game/constants";
 import {
   createMatchState,
+  finishCountdown,
   restartMatch,
   startMatch,
   stepMatch,
   togglePause
 } from "../game/simulation";
-import type { EffectEvent, InputAction, MatchState, Side } from "../game/types";
-import { HudOverlay } from "../ui/HudOverlay";
+import type { EffectEvent, InputAction, MatchConfig, MatchState, Side } from "../game/types";
+import { HudOverlay, type SetupSelection } from "../ui/HudOverlay";
 
 type PaddleViews = Record<Side, Phaser.GameObjects.Rectangle>;
 type BootData = {
@@ -51,14 +53,21 @@ export class GameScene extends Phaser.Scene {
   private hud?: HudOverlay;
   private cursors?: Phaser.Types.Input.Keyboard.CursorKeys;
   private keys?: Record<string, Phaser.Input.Keyboard.Key>;
-  private pointerTargetY?: number;
-  private pointerActive = false;
   private lastArenaKey?: string;
   private lastBallKey?: string;
   private effectProfile!: EffectProfile;
   private frameSamples = 0;
   private slowFrames = 0;
   private introActive = true;
+  private currentSetup: SetupSelection = {
+    ...DEFAULT_MATCH_CONFIG,
+    arenaKey: "random",
+    ballKey: "random"
+  };
+  private readonly pointerTargets: Partial<Record<Side, number>> = {};
+  private readonly pointerSides = new Map<number, Side>();
+  private countdownTimer?: Phaser.Time.TimerEvent;
+  private countdownGoTimer?: Phaser.Time.TimerEvent;
   private readonly audio = new AudioController();
 
   constructor() {
@@ -141,18 +150,24 @@ export class GameScene extends Phaser.Scene {
         this.startFromIntro();
         return;
       }
-      this.pointerActive = true;
-      this.pointerTargetY = this.screenToWorldY(pointer.y);
+      const side = this.sideForPointer(pointer);
+      this.pointerSides.set(pointer.id, side);
+      this.pointerTargets[side] = this.screenToWorldY(pointer.y);
     });
 
     this.input.on("pointermove", (pointer: Phaser.Input.Pointer) => {
-      if (pointer.isDown || this.pointerActive) {
-        this.pointerTargetY = this.screenToWorldY(pointer.y);
+      const side = this.pointerSides.get(pointer.id);
+      if (side && pointer.isDown) {
+        this.pointerTargets[side] = this.screenToWorldY(pointer.y);
       }
     });
 
-    this.input.on("pointerup", () => {
-      this.pointerActive = false;
+    this.input.on("pointerup", (pointer: Phaser.Input.Pointer) => {
+      const side = this.pointerSides.get(pointer.id);
+      if (side) {
+        delete this.pointerTargets[side];
+      }
+      this.pointerSides.delete(pointer.id);
     });
 
     this.input.keyboard?.on("keydown-TAB", (event: KeyboardEvent) => {
@@ -164,10 +179,10 @@ export class GameScene extends Phaser.Scene {
         this.startFromIntro();
         return;
       }
-      this.handlePrimaryAction();
+      this.handlePrimaryAction(this.hud?.getSetupSelection() ?? this.currentSetup);
     });
     this.input.keyboard?.on("keydown-ESC", () => this.pauseOrResume());
-    this.input.keyboard?.on("keydown-R", () => this.restartWithRandomArena());
+    this.input.keyboard?.on("keydown-R", () => this.restartWithCurrentSetup());
   }
 
   private createHud(): void {
@@ -176,28 +191,51 @@ export class GameScene extends Phaser.Scene {
       return;
     }
 
-    this.hud = new HudOverlay(root, {
-      onIntroStart: () => this.startFromIntro(),
-      onStart: () => this.handlePrimaryAction(),
-      onPause: () => this.pauseOrResume(),
-      onRestart: () => this.restartWithRandomArena(),
-      onMute: () => this.toggleMute()
-    }, this.audio.isMuted, INTRO_ASSET.url);
+    this.hud = new HudOverlay(
+      root,
+      {
+        onIntroStart: () => this.startFromIntro(),
+        onStart: (setup) => this.handlePrimaryAction(setup),
+        onPause: () => this.pauseOrResume(),
+        onRestart: () => this.restartWithCurrentSetup(),
+        onMute: () => this.toggleMute(),
+        onSetup: () => this.showSetup()
+      },
+      {
+        initialMuted: this.audio.isMuted,
+        introImageUrl: INTRO_ASSET.url,
+        arenas: this.getLoadedArenas(),
+        balls: this.getLoadedBalls(),
+        initialSetup: this.currentSetup
+      }
+    );
     this.hud.update(this.match, this.arena);
   }
 
   private readInput(): InputAction {
-    let direction: -1 | 0 | 1 = 0;
+    let leftDirection: -1 | 0 | 1 = 0;
+    let rightDirection: -1 | 0 | 1 = 0;
+    const arrowsControlLeft = this.match.config.mode === "ai";
 
-    if (this.cursors?.up?.isDown || this.keys?.W?.isDown) {
-      direction = -1;
-    } else if (this.cursors?.down?.isDown || this.keys?.S?.isDown) {
-      direction = 1;
+    if (this.keys?.W?.isDown || (arrowsControlLeft && this.cursors?.up?.isDown)) {
+      leftDirection = -1;
+    } else if (this.keys?.S?.isDown || (arrowsControlLeft && this.cursors?.down?.isDown)) {
+      leftDirection = 1;
+    }
+
+    if (this.match.config.mode === "twoPlayer") {
+      if (this.cursors?.up?.isDown) {
+        rightDirection = -1;
+      } else if (this.cursors?.down?.isDown) {
+        rightDirection = 1;
+      }
     }
 
     return {
-      playerDirection: direction,
-      playerTargetY: direction === 0 ? this.pointerTargetY : undefined
+      leftDirection,
+      leftTargetY: leftDirection === 0 ? this.pointerTargets.left : undefined,
+      rightDirection,
+      rightTargetY: rightDirection === 0 ? this.pointerTargets.right : undefined
     };
   }
 
@@ -233,7 +271,12 @@ export class GameScene extends Phaser.Scene {
     }
 
     if (this.match.phase === "gameOver") {
+      this.clearCountdown();
       this.audio.pauseMusic();
+    }
+
+    if (effects.some((effect) => effect.type === "score") && this.match.phase === "countdown") {
+      this.beginServeCountdown();
     }
 
     if (effects.length > 0) {
@@ -318,19 +361,22 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
-  private handlePrimaryAction(): void {
+  private handlePrimaryAction(setup: SetupSelection = this.currentSetup): void {
     void this.audio.unlock();
 
     if (this.match.phase === "ready") {
-      startMatch(this.match);
-      this.audio.playUi("start");
-      this.audio.startMusic();
+      this.startNewMatch(setup, "start");
+    } else if (this.match.phase === "gameOver") {
+      this.startNewMatch(setup, "restart");
     } else if (this.match.phase === "paused") {
+      const returnPhase = this.match.pauseReturnPhase;
       togglePause(this.match);
       this.audio.playUi("start");
-      this.audio.startMusic();
-    } else if (this.match.phase === "gameOver") {
-      this.restartWithRandomArena();
+      if (returnPhase === "countdown") {
+        this.beginServeCountdown();
+      } else {
+        this.audio.startMusic();
+      }
     }
     this.hud?.update(this.match, this.arena);
   }
@@ -342,7 +388,9 @@ export class GameScene extends Phaser.Scene {
 
     this.introActive = false;
     this.hud?.setIntroVisible(false);
-    this.handlePrimaryAction();
+    void this.audio.unlock();
+    this.audio.playUi("start");
+    this.hud?.update(this.match, this.arena);
   }
 
   private pauseOrResume(): void {
@@ -351,10 +399,17 @@ export class GameScene extends Phaser.Scene {
     }
 
     void this.audio.unlock();
+    const wasCountdown = this.match.phase === "countdown";
     togglePause(this.match);
     if (this.match.phase === "paused") {
+      if (wasCountdown) {
+        this.clearCountdown();
+      }
       this.audio.playUi("pause");
       this.audio.pauseMusic();
+    } else if (this.match.phase === "countdown") {
+      this.audio.playUi("start");
+      this.beginServeCountdown();
     } else if (this.match.phase === "playing") {
       this.audio.playUi("start");
       this.audio.startMusic();
@@ -362,25 +417,92 @@ export class GameScene extends Phaser.Scene {
     this.hud?.update(this.match, this.arena);
   }
 
-  private restartWithRandomArena(): void {
+  private restartWithCurrentSetup(): void {
     if (this.introActive) {
       return;
     }
 
     void this.audio.unlock();
-    this.arena = this.getRandomLoadedArena();
-    this.ballAsset = this.getRandomLoadedBall();
+    this.startNewMatch(this.hud?.getSetupSelection() ?? this.currentSetup, "restart");
+  }
+
+  private startNewMatch(setup: SetupSelection, tone: "start" | "restart"): void {
+    this.clearCountdown();
+    this.currentSetup = setup;
+    this.arena = this.resolveArena(setup.arenaKey);
+    this.ballAsset = this.resolveBall(setup.ballKey);
     this.lastArenaKey = this.arena.key;
     this.lastBallKey = this.ballAsset.key;
-    restartMatch(this.match);
+    const config: MatchConfig = {
+      mode: setup.mode,
+      difficulty: setup.difficulty
+    };
+    if (this.match.phase === "ready") {
+      startMatch(this.match, config);
+    } else {
+      restartMatch(this.match, config);
+    }
     this.background.setTexture(this.arena.key);
     this.applyBallTexture(this.ballAsset.key);
     this.paddles.left.setFillStyle(this.arena.leftColor, 0.9);
     this.paddles.right.setFillStyle(this.arena.rightColor, 0.9);
     this.syncViews(true);
-    this.audio.playUi("restart");
+    this.audio.playUi(tone);
     this.audio.startMusic();
+    this.beginServeCountdown();
     this.hud?.update(this.match, this.arena);
+  }
+
+  private showSetup(): void {
+    this.clearCountdown();
+    this.audio.pauseMusic();
+    this.match = createMatchState({
+      mode: this.currentSetup.mode,
+      difficulty: this.currentSetup.difficulty
+    });
+    this.syncViews(true);
+    this.hud?.update(this.match, this.arena);
+  }
+
+  private beginServeCountdown(): void {
+    if (this.match.phase !== "countdown") {
+      return;
+    }
+
+    this.clearCountdown();
+    const labels = ["3", "2", "1", "GO"];
+    let index = 0;
+    this.hud?.setCountdown(labels[index]);
+    this.audio.playUi("countdown");
+    this.countdownTimer = this.time.addEvent({
+      delay: 650,
+      repeat: labels.length - 1,
+      callback: () => {
+        index += 1;
+        const label = labels[index];
+        this.hud?.setCountdown(label);
+        this.audio.playUi(label === "GO" ? "go" : "countdown");
+
+        if (label === "GO") {
+          this.countdownGoTimer = this.time.addEvent({
+            delay: 260,
+            callback: () => {
+              finishCountdown(this.match);
+              this.hud?.setCountdown(undefined);
+              this.hud?.update(this.match, this.arena);
+            }
+          });
+        }
+      }
+    });
+  }
+
+  private clearCountdown(): void {
+    this.countdownTimer?.remove(false);
+    this.countdownGoTimer?.remove(false);
+    this.countdownTimer = undefined;
+    this.countdownGoTimer = undefined;
+    this.hud?.setCountdown(undefined);
   }
 
   private toggleMute(): boolean {
@@ -401,10 +523,47 @@ export class GameScene extends Phaser.Scene {
     return Phaser.Math.Clamp(worldPoint.y, 0, FIELD_HEIGHT);
   }
 
+  private sideForPointer(pointer: Phaser.Input.Pointer): Side {
+    if (this.match.config.mode !== "twoPlayer") {
+      return "left";
+    }
+
+    return pointer.x < this.scale.gameSize.width / 2 ? "left" : "right";
+  }
+
+  private getLoadedArenas(): ArenaAsset[] {
+    const loaded = ARENAS.filter((arena) => this.textures.exists(arena.key));
+    return loaded.length > 0 ? loaded : [this.arena];
+  }
+
+  private getLoadedBalls(): BallAsset[] {
+    const loaded = BALLS.filter((ball) => this.textures.exists(ball.key));
+    return loaded.length > 0 ? loaded : [this.ballAsset];
+  }
+
+  private resolveArena(choice: string): ArenaAsset {
+    if (choice === "random") {
+      return this.getRandomLoadedArena();
+    }
+
+    const selected = ARENAS.find((arena) => arena.key === choice && this.textures.exists(arena.key));
+    return selected ?? this.getRandomLoadedArena();
+  }
+
+  private resolveBall(choice: string): BallAsset {
+    if (choice === "random") {
+      return this.getRandomLoadedBall();
+    }
+
+    const selected = BALLS.find((ball) => ball.key === choice && this.textures.exists(ball.key));
+    return selected ?? this.getRandomLoadedBall();
+  }
+
   private lazyLoadRemainingArenas(): void {
     const remainingArenas = ARENAS.filter((arena) => arena.key !== this.arena.key && !this.textures.exists(arena.key));
     const remainingBalls = BALLS.filter((ball) => ball.key !== this.ballAsset.key && !this.textures.exists(ball.key));
     if (remainingArenas.length === 0 && remainingBalls.length === 0) {
+      this.hud?.setAssetOptions(this.getLoadedArenas(), this.getLoadedBalls());
       return;
     }
 
@@ -414,6 +573,9 @@ export class GameScene extends Phaser.Scene {
     for (const ball of remainingBalls) {
       this.load.image(ball.key, ball.url);
     }
+    this.load.once(Phaser.Loader.Events.COMPLETE, () => {
+      this.hud?.setAssetOptions(this.getLoadedArenas(), this.getLoadedBalls());
+    });
     this.load.start();
   }
 
