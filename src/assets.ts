@@ -12,7 +12,17 @@ export type BallAsset = {
   url: string;
 };
 
+export type IntroAsset = {
+  key: string;
+  url: string;
+};
+
 const assetUrl = (path: string) => `${import.meta.env.BASE_URL}${path}`;
+
+export const INTRO_ASSET: IntroAsset = {
+  key: "wzx-intro",
+  url: assetUrl("assets/optimized/intro/wzx-intro.jpg")
+};
 
 export const ARENAS: ArenaAsset[] = [
   {

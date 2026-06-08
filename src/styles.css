@@ -73,8 +73,57 @@ button {
 
 .hud__top,
 .hud__hint,
-.hud__center {
+.hud__center,
+.hud__intro {
   pointer-events: auto;
+}
+
+.hud__intro {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background: #020611;
+  cursor: pointer;
+}
+
+.hud__intro[hidden] {
+  display: none;
+}
+
+.hud__intro-image {
+  width: min(100vw, calc(100vh * 0.5625));
+  height: min(100vh, calc(100vw * 1.7778));
+  object-fit: cover;
+  filter: drop-shadow(0 0 32px rgba(33, 214, 255, 0.2));
+}
+
+.hud__intro-prompt {
+  position: absolute;
+  left: 50%;
+  bottom: max(22px, env(safe-area-inset-bottom));
+  width: min(360px, calc(100vw - 40px));
+  transform: translateX(-50%);
+  padding: 12px 14px;
+  border: 1px solid rgba(120, 229, 255, 0.45);
+  background: rgba(2, 6, 17, 0.72);
+  box-shadow:
+    0 0 24px rgba(33, 214, 255, 0.24),
+    inset 0 0 20px rgba(255, 69, 201, 0.12);
+  color: var(--text);
+  font-size: clamp(13px, 3vw, 16px);
+  font-weight: 950;
+  line-height: 1;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.hud[data-intro="true"] .hud__top,
+.hud[data-intro="true"] .hud__center,
+.hud[data-intro="true"] .hud__hint {
+  display: none;
 }
 
 .hud__top {

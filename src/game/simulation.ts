@@ -1,5 +1,6 @@
 import {
   AI_DEAD_ZONE,
+  AI_PREDICTION_ERROR,
   AI_REACTION,
   AI_SPEED,
   BALL_MAX_SPEED,
@@ -116,7 +117,7 @@ export function stepMatch(match: MatchState, input: InputAction, dtSeconds: numb
   }
 
   updatePlayerPaddle(match.paddles.left, input, dt);
-  updateAiPaddle(match.paddles.right, match.ball, dt);
+  updateAiPaddle(match.paddles.right, match.ball, match.rally, dt);
   updateBall(match, dt, effects);
 
   return effects;
@@ -138,15 +139,21 @@ function updatePlayerPaddle(paddle: PaddleState, input: InputAction, dt: number)
   paddle.velocityY = (paddle.y - previousY) / Math.max(dt, 0.0001);
 }
 
-function updateAiPaddle(paddle: PaddleState, ball: BallState, dt: number): void {
+function updateAiPaddle(paddle: PaddleState, ball: BallState, rally: number, dt: number): void {
   const previousY = paddle.y;
   const isThreatened = ball.vx > 0;
   const predictedY = predictBallY(ball, paddle.x);
-  const targetY = isThreatened ? predictedY : FIELD_CENTER_Y;
+  const pressure = clamp(ball.speed / BALL_MAX_SPEED, 0, 1);
+  const predictionError =
+    Math.sin(ball.x * 0.027 + ball.y * 0.014 + ball.spin * 1.8 + rally * 0.41) *
+    AI_PREDICTION_ERROR *
+    (0.62 + pressure * 0.38);
+  const targetY = isThreatened ? predictedY + predictionError : FIELD_CENTER_Y;
   const error = targetY - paddle.y;
 
   if (Math.abs(error) > AI_DEAD_ZONE) {
-    const easedStep = error * Math.min(1, AI_REACTION * dt);
+    const reaction = isThreatened ? AI_REACTION * (0.78 + (1 - pressure) * 0.16) : AI_REACTION * 0.52;
+    const easedStep = error * Math.min(1, reaction * dt);
     paddle.y += clamp(easedStep, -AI_SPEED * dt, AI_SPEED * dt);
   }
 

@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { getRandomArena, getRandomBall } from "../assets";
+import { INTRO_ASSET, getRandomArena, getRandomBall } from "../assets";
 
 export class BootScene extends Phaser.Scene {
   private initialArenaKey = "";
@@ -14,6 +14,7 @@ export class BootScene extends Phaser.Scene {
     const ball = getRandomBall();
     this.initialArenaKey = arena.key;
     this.initialBallKey = ball.key;
+    this.load.image(INTRO_ASSET.key, INTRO_ASSET.url);
     this.load.image(arena.key, arena.url);
     this.load.image(ball.key, ball.url);
   }

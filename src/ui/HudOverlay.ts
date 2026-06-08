@@ -2,6 +2,7 @@ import type { ArenaAsset } from "../assets";
 import type { MatchState } from "../game/types";
 
 type HudCallbacks = {
+  onIntroStart: () => void;
   onStart: () => void;
   onPause: () => void;
   onRestart: () => void;
@@ -14,6 +15,7 @@ export class HudOverlay {
   private readonly scoreLeft: HTMLElement;
   private readonly scoreRight: HTMLElement;
   private readonly arenaName: HTMLElement;
+  private readonly intro: HTMLElement;
   private readonly panel: HTMLElement;
   private readonly title: HTMLElement;
   private readonly subtitle: HTMLElement;
@@ -22,19 +24,24 @@ export class HudOverlay {
   private readonly mute: HTMLButtonElement;
   private lastSignature = "";
   private muted: boolean;
+  private introVisible = true;
 
-  constructor(root: HTMLElement, callbacks: HudCallbacks, initialMuted = false) {
+  constructor(root: HTMLElement, callbacks: HudCallbacks, initialMuted = false, introImageUrl = "") {
     this.root = root;
     this.callbacks = callbacks;
     this.muted = initialMuted;
     this.root.className = "hud";
     this.root.innerHTML = `
+      <section class="hud__intro" data-intro-screen data-action="intro-start">
+        <img class="hud__intro-image" src="${introImageUrl}" alt="WZX Neon Pong intro screen" />
+        <div class="hud__intro-prompt">Press Tab or tap to start</div>
+      </section>
       <section class="hud__top" aria-live="polite">
         <div class="hud__score"><span data-score-left>0</span><i></i><span data-score-right>0</span></div>
         <div class="hud__arena" data-arena-name>Neon Arena</div>
         <div class="hud__actions">
           <button class="icon-button" type="button" data-action="pause" aria-label="Pause">II</button>
-          <button class="icon-button" type="button" data-action="mute" aria-label="Mute">S</button>
+          <button class="icon-button" type="button" data-action="mute" aria-label="Mute sound">ON</button>
           <button class="icon-button" type="button" data-action="restart" aria-label="Restart">R</button>
         </div>
       </section>
@@ -53,6 +60,7 @@ export class HudOverlay {
     this.scoreLeft = this.queryRequired("[data-score-left]");
     this.scoreRight = this.queryRequired("[data-score-right]");
     this.arenaName = this.queryRequired("[data-arena-name]");
+    this.intro = this.queryRequired("[data-intro-screen]");
     this.panel = this.queryRequired("[data-panel]");
     this.title = this.queryRequired("[data-title]");
     this.subtitle = this.queryRequired("[data-subtitle]");
@@ -60,11 +68,14 @@ export class HudOverlay {
     this.pause = this.queryRequired('[data-action="pause"]');
     this.mute = this.queryRequired('[data-action="mute"]');
     this.updateMuteButton();
+    this.setIntroVisible(Boolean(introImageUrl));
 
     this.root.addEventListener("click", (event) => {
       const target = event.target as HTMLElement;
       const action = target.closest<HTMLElement>("[data-action]")?.dataset.action;
-      if (action === "start") {
+      if (action === "intro-start") {
+        this.callbacks.onIntroStart();
+      } else if (action === "start") {
         this.callbacks.onStart();
       } else if (action === "pause") {
         this.callbacks.onPause();
@@ -77,6 +88,16 @@ export class HudOverlay {
     });
   }
 
+  setIntroVisible(visible: boolean): void {
+    this.introVisible = visible;
+    this.intro.hidden = !visible;
+    if (visible) {
+      this.root.dataset.intro = "true";
+    } else {
+      delete this.root.dataset.intro;
+    }
+  }
+
   update(match: MatchState, arena: ArenaAsset): void {
     const signature = [
       match.phase,
@@ -84,7 +105,8 @@ export class HudOverlay {
       match.scores.right,
       match.winner ?? "",
       arena.key,
-      this.muted ? "muted" : "sound"
+      this.muted ? "muted" : "sound",
+      this.introVisible ? "intro" : "game"
     ].join("|");
 
     if (signature === this.lastSignature) {
@@ -146,8 +168,9 @@ export class HudOverlay {
   }
 
   private updateMuteButton(): void {
-    this.mute.textContent = this.muted ? "M" : "S";
-    this.mute.setAttribute("aria-label", this.muted ? "Unmute" : "Mute");
+    this.mute.textContent = this.muted ? "OFF" : "ON";
+    this.mute.setAttribute("aria-label", this.muted ? "Unmute sound" : "Mute sound");
+    this.mute.setAttribute("title", this.muted ? "Sound muted" : "Sound on");
     this.lastSignature = "";
   }
 }

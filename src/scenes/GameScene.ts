@@ -1,6 +1,14 @@
 import Phaser from "phaser";
 import { AudioController } from "../audio/AudioController";
-import { ARENAS, BALLS, type ArenaAsset, type BallAsset, getRandomArena, getRandomBall } from "../assets";
+import {
+  ARENAS,
+  BALLS,
+  INTRO_ASSET,
+  type ArenaAsset,
+  type BallAsset,
+  getRandomArena,
+  getRandomBall
+} from "../assets";
 import {
   BALL_RADIUS,
   FIELD_CENTER_X,
@@ -50,6 +58,7 @@ export class GameScene extends Phaser.Scene {
   private effectProfile!: EffectProfile;
   private frameSamples = 0;
   private slowFrames = 0;
+  private introActive = true;
   private readonly audio = new AudioController();
 
   constructor() {
@@ -125,9 +134,13 @@ export class GameScene extends Phaser.Scene {
 
   private createInput(): void {
     this.cursors = this.input.keyboard?.createCursorKeys();
-    this.keys = this.input.keyboard?.addKeys("W,S,SPACE,ESC,R") as Record<string, Phaser.Input.Keyboard.Key>;
+    this.keys = this.input.keyboard?.addKeys("W,S,SPACE,ESC,R,TAB") as Record<string, Phaser.Input.Keyboard.Key>;
 
     this.input.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
+      if (this.introActive) {
+        this.startFromIntro();
+        return;
+      }
       this.pointerActive = true;
       this.pointerTargetY = this.screenToWorldY(pointer.y);
     });
@@ -142,7 +155,17 @@ export class GameScene extends Phaser.Scene {
       this.pointerActive = false;
     });
 
-    this.input.keyboard?.on("keydown-SPACE", () => this.handlePrimaryAction());
+    this.input.keyboard?.on("keydown-TAB", (event: KeyboardEvent) => {
+      event.preventDefault();
+      this.startFromIntro();
+    });
+    this.input.keyboard?.on("keydown-SPACE", () => {
+      if (this.introActive) {
+        this.startFromIntro();
+        return;
+      }
+      this.handlePrimaryAction();
+    });
     this.input.keyboard?.on("keydown-ESC", () => this.pauseOrResume());
     this.input.keyboard?.on("keydown-R", () => this.restartWithRandomArena());
   }
@@ -154,11 +177,12 @@ export class GameScene extends Phaser.Scene {
     }
 
     this.hud = new HudOverlay(root, {
+      onIntroStart: () => this.startFromIntro(),
       onStart: () => this.handlePrimaryAction(),
       onPause: () => this.pauseOrResume(),
       onRestart: () => this.restartWithRandomArena(),
       onMute: () => this.toggleMute()
-    }, this.audio.isMuted);
+    }, this.audio.isMuted, INTRO_ASSET.url);
     this.hud.update(this.match, this.arena);
   }
 
@@ -311,7 +335,21 @@ export class GameScene extends Phaser.Scene {
     this.hud?.update(this.match, this.arena);
   }
 
+  private startFromIntro(): void {
+    if (!this.introActive) {
+      return;
+    }
+
+    this.introActive = false;
+    this.hud?.setIntroVisible(false);
+    this.handlePrimaryAction();
+  }
+
   private pauseOrResume(): void {
+    if (this.introActive) {
+      return;
+    }
+
     void this.audio.unlock();
     togglePause(this.match);
     if (this.match.phase === "paused") {
@@ -325,6 +363,10 @@ export class GameScene extends Phaser.Scene {
   }
 
   private restartWithRandomArena(): void {
+    if (this.introActive) {
+      return;
+    }
+
     void this.audio.unlock();
     this.arena = this.getRandomLoadedArena();
     this.ballAsset = this.getRandomLoadedBall();
